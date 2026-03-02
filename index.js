@@ -82,6 +82,109 @@ app.post('/api/send-message', async (req, res) => {
     }
 });
 
+app.post('/api/send-bulk-messages', async (req, res) => {
+    try {
+        const { templateId, recipients } = req.body;
+
+        if (!templateId || !recipients || !Array.isArray(recipients) || recipients.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required parameters. templateId and a non-empty recipients array are required.'
+            });
+        }
+
+        const token = process.env.WHATSAPP_TOKEN;
+        const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+        if (!token || !phoneNumberId) {
+            return res.status(500).json({
+                success: false,
+                error: 'WhatsApp API credentials are not configured properly.'
+            });
+        }
+
+        const apiUrl = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`;
+
+        const sendPromises = recipients.map(async (recipient) => {
+            const requestBody = {
+                messaging_product: 'whatsapp',
+                to: recipient.phoneNumber,
+                type: 'template',
+                template: {
+                    name: templateId,
+                    language: {
+                        code: 'en_US' // Default language code, can be made dynamic later
+                    }
+                }
+            };
+
+            // Add parameters if provided for this recipient
+            if (recipient.parameters && Array.isArray(recipient.parameters) && recipient.parameters.length > 0) {
+                requestBody.template.components = [
+                    {
+                        type: 'body',
+                        parameters: recipient.parameters.map(param => {
+                            // Default to text if type is not provided
+                            const paramType = param.type || 'text';
+                            return {
+                                type: paramType,
+                                [paramType]: param.value
+                            };
+                        })
+                    }
+                ];
+            }
+
+            try {
+                const response = await axios.post(apiUrl, requestBody, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                return {
+                    phoneNumber: recipient.phoneNumber,
+                    status: 'success',
+                    data: response.data
+                };
+            } catch (error) {
+                return {
+                    phoneNumber: recipient.phoneNumber,
+                    status: 'failed',
+                    error: error.response ? error.response.data : error.message
+                };
+            }
+        });
+
+        // Use Promise.allSettled to ensure all are processed even if some fail
+        const results = await Promise.allSettled(sendPromises);
+
+        const details = results.map(r => r.value);
+        const successful = details.filter(d => d.status === 'success').length;
+        const failed = details.filter(d => d.status === 'failed').length;
+
+        const summary = {
+            total: recipients.length,
+            successful,
+            failed,
+            details
+        };
+
+        res.status(200).json({
+            success: true,
+            summary,
+            message: 'Bulk WhatsApp message processing completed.'
+        });
+
+    } catch (error) {
+        console.error('Error in bulk send:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error while processing bulk messages.'
+        });
+    }
+});
+
 app.get('/api/templates', async (req, res) => {
     try {
         const token = process.env.WHATSAPP_TOKEN;

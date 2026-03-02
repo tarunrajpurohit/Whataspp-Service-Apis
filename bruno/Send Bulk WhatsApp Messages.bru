@@ -1,0 +1,23 @@
+meta {
+  name: Send Bulk WhatsApp Messages
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://localhost:3000/api/send-bulk-messages
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "templateId": "hello_world",
+    "recipients": [
+      {
+        "phoneNumber": "+916350182509",
+        "parameters": []
+      }
+    ]
+  }
+}
