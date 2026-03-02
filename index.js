@@ -153,67 +153,80 @@ app.post('/api/send-bulk-messages', async (req, res) => {
 
         const apiUrl = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`;
 
-        const sendPromises = recipients.map(async (recipient) => {
-            const requestBody = {
-                messaging_product: 'whatsapp',
-                to: recipient.phoneNumber,
-                type: 'template',
-                template: {
-                    name: templateId,
-                    language: {
-                        code: 'en_US' // Default language code, can be made dynamic later
+        const results = [];
+        const BATCH_SIZE = 50;
+        const DELAY_MS = 1000;
+
+        for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
+            const batch = recipients.slice(i, i + BATCH_SIZE);
+
+            const batchPromises = batch.map(async (recipient) => {
+                const requestBody = {
+                    messaging_product: 'whatsapp',
+                    to: recipient.phoneNumber,
+                    type: 'template',
+                    template: {
+                        name: templateId,
+                        language: {
+                            code: 'en_US' // Default language code, can be made dynamic later
+                        }
                     }
+                };
+
+                // Add parameters if provided for this recipient
+                if (recipient.parameters && Array.isArray(recipient.parameters) && recipient.parameters.length > 0) {
+                    requestBody.template.components = [
+                        {
+                            type: 'body',
+                            parameters: recipient.parameters.map(param => {
+                                // Default to text if type is not provided
+                                const paramType = param.type || 'text';
+                                return {
+                                    type: paramType,
+                                    [paramType]: param.value
+                                };
+                            })
+                        }
+                    ];
                 }
-            };
 
-            // Add parameters if provided for this recipient
-            if (recipient.parameters && Array.isArray(recipient.parameters) && recipient.parameters.length > 0) {
-                requestBody.template.components = [
-                    {
-                        type: 'body',
-                        parameters: recipient.parameters.map(param => {
-                            // Default to text if type is not provided
-                            const paramType = param.type || 'text';
-                            return {
-                                type: paramType,
-                                [paramType]: param.value
-                            };
-                        })
-                    }
-                ];
+                try {
+                    const response = await axios.post(apiUrl, requestBody, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    return {
+                        name: recipient.name || recipient.customerName || 'Unknown',
+                        phoneNumber: recipient.phoneNumber,
+                        status: 'success',
+                        data: response.data,
+                        time: new Date().toISOString(),
+                        templateId: templateId,
+                        parameters: recipient.parameters || []
+                    };
+                } catch (error) {
+                    return {
+                        name: recipient.name || recipient.customerName || 'Unknown',
+                        phoneNumber: recipient.phoneNumber,
+                        status: 'failed',
+                        error: error.response ? error.response.data : error.message,
+                        time: new Date().toISOString(),
+                        templateId: templateId,
+                        parameters: recipient.parameters || []
+                    };
+                }
+            });
+
+            const batchResults = await Promise.allSettled(batchPromises);
+            results.push(...batchResults);
+
+            // Wait before processing the next batch (if there are more batches)
+            if (i + BATCH_SIZE < recipients.length) {
+                await new Promise(resolve => setTimeout(resolve, DELAY_MS));
             }
-
-            try {
-                const response = await axios.post(apiUrl, requestBody, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-                return {
-                    name: recipient.name || recipient.customerName || 'Unknown',
-                    phoneNumber: recipient.phoneNumber,
-                    status: 'success',
-                    data: response.data,
-                    time: new Date().toISOString(),
-                    templateId: templateId,
-                    parameters: recipient.parameters || []
-                };
-            } catch (error) {
-                return {
-                    name: recipient.name || recipient.customerName || 'Unknown',
-                    phoneNumber: recipient.phoneNumber,
-                    status: 'failed',
-                    error: error.response ? error.response.data : error.message,
-                    time: new Date().toISOString(),
-                    templateId: templateId,
-                    parameters: recipient.parameters || []
-                };
-            }
-        });
-
-        // Use Promise.allSettled to ensure all are processed even if some fail
-        const results = await Promise.allSettled(sendPromises);
+        }
 
         const details = results.map(r => r.value);
         const successful = details.filter(d => d.status === 'success').length;
@@ -222,20 +235,24 @@ app.post('/api/send-bulk-messages', async (req, res) => {
         try {
             const logsDir = path.join(__dirname, 'data');
             if (!fs.existsSync(logsDir)) {
-                fs.mkdirSync(logsDir);
+                await fs.promises.mkdir(logsDir, { recursive: true });
             }
             const logsFile = path.join(logsDir, 'bulk_message_logs.json');
 
             let existingLogs = [];
             if (fs.existsSync(logsFile)) {
-                const fileContent = fs.readFileSync(logsFile, 'utf8');
+                const fileContent = await fs.promises.readFile(logsFile, 'utf8');
                 if (fileContent) {
-                    existingLogs = JSON.parse(fileContent);
+                    try {
+                        existingLogs = JSON.parse(fileContent);
+                    } catch (e) {
+                        existingLogs = [];
+                    }
                 }
             }
 
             existingLogs = [...existingLogs, ...details];
-            fs.writeFileSync(logsFile, JSON.stringify(existingLogs, null, 2));
+            await fs.promises.writeFile(logsFile, JSON.stringify(existingLogs, null, 2));
         } catch (logError) {
             console.error('Error saving bulk message logs:', logError);
         }
