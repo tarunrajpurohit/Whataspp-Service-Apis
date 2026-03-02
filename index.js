@@ -236,18 +236,22 @@ app.post('/api/webhooks/shopify/customer-created', async (req, res) => {
 
             if (phoneNumber) {
                 // Clean phone number (remove +, -, spaces, etc.)
-                // const cleanPhoneNumber = phoneNumber.replace(/[^0-9]/g, '');
-                const cleanPhoneNumber = "+916350182509";
-                const templateId = "hello_world";
+                const cleanPhoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+                const templateId = process.env.CUSTOMER_CRETED_TEMPLATE;
 
                 if (templateId) {
                     try {
                         // Call the local /api/send-message endpoint
-                        const apiUrl = `https://whataspp-service-apis.onrender.com/api/send-message`;
+                        const apiUrl = `${process.env.BACKEND_PROD_URL}/send-message`;
                         await axios.post(apiUrl, {
                             phoneNumber: cleanPhoneNumber,
                             templateId: templateId,
-                            parameters: []
+                            parameters: [
+                                {
+                                    type: 'text',
+                                    value: customer.first_name || 'Customer'
+                                }
+                            ]
                         });
                         console.log(`Successfully triggered send-message for Shopify customer ${customer.id}`);
                     } catch (err) {
