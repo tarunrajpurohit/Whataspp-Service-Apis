@@ -222,6 +222,22 @@ app.get('/api/templates', async (req, res) => {
     }
 });
 
+app.post('/api/webhooks/shopify/customer-created', async (req, res) => {
+    try {
+        const customer = req.body;
+        console.log('Received Shopify customer/created webhook for customer ID:', customer.id, customer);
+
+        // Acknowledge webhook immediately so Shopify doesn't timeout
+        res.status(200).json({ success: true, message: 'Webhook received' });
+
+    } catch (error) {
+        console.error('Error processing Shopify customer webhook:', error.response ? error.response.data : error.message);
+        if (!res.headersSent) {
+            res.status(500).json({ success: false, error: 'Internal server error while processing webhook' });
+        }
+    }
+});
+
 app.listen(port, () => {
     console.log(`WhatsApp API service listening at http://localhost:${port}`);
 });
