@@ -237,7 +237,7 @@ app.post('/api/webhooks/shopify/customer-created', async (req, res) => {
             if (phoneNumber) {
                 // Clean phone number (remove +, -, spaces, etc.)
                 // const cleanPhoneNumber = phoneNumber.replace(/[^0-9]/g, '');
-                const cleanPhoneNumber = 6350182509;
+                const cleanPhoneNumber = "+916350182509";
                 const templateId = "hello_world";
 
                 if (templateId) {
