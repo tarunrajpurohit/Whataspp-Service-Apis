@@ -274,5 +274,5 @@ app.post('/api/webhooks/shopify/customer-created', async (req, res) => {
 });
 
 app.listen(port, () => {
-    console.log(`WhatsApp API service listening at http://localhost:${port}`);
+    console.log(`WhatsApp API service listening at ${port}`);
 });
