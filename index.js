@@ -118,6 +118,7 @@ app.get('/api/templates', async (req, res) => {
         });
     }
 });
+
 app.listen(port, () => {
     console.log(`WhatsApp API service listening at http://localhost:${port}`);
 });
