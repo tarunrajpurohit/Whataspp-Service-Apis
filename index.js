@@ -247,12 +247,7 @@ app.post('/api/webhooks/shopify/customer-created', async (req, res) => {
                         await axios.post(apiUrl, {
                             phoneNumber: cleanPhoneNumber,
                             templateId: templateId,
-                            parameters: [
-                                {
-                                    type: 'text',
-                                    value: customer.first_name || 'Customer'
-                                }
-                            ]
+                            parameters: []
                         });
                         console.log(`Successfully triggered send-message for Shopify customer ${customer.id}`);
                     } catch (err) {
