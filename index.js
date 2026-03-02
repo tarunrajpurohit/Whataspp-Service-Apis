@@ -1,12 +1,60 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 // Enable JSON body parsing
 app.use(express.json());
+
+function storeFailedLog(req, responseStatus, responseBody, errorObj) {
+    try {
+        const logsDir = path.join(__dirname, 'data');
+        if (!fs.existsSync(logsDir)) {
+            fs.mkdirSync(logsDir);
+        }
+        const logsFile = path.join(logsDir, 'api_error_logs.json');
+
+        let existingLogs = [];
+        if (fs.existsSync(logsFile)) {
+            const fileContent = fs.readFileSync(logsFile, 'utf8');
+            if (fileContent) {
+                try {
+                    existingLogs = JSON.parse(fileContent);
+                } catch (e) {
+                    existingLogs = [];
+                }
+            }
+        }
+
+        existingLogs.push({
+            time: new Date().toISOString(),
+            endpoint: req.originalUrl || req.url,
+            method: req.method,
+            requestBody: req.body,
+            responseStatus: responseStatus || 500,
+            errorDetails: errorObj || responseBody
+        });
+
+        fs.writeFileSync(logsFile, JSON.stringify(existingLogs, null, 2));
+    } catch (logError) {
+        console.error('Error saving failed request log:', logError);
+    }
+}
+
+app.use((req, res, next) => {
+    const originalJson = res.json;
+    res.json = function (body) {
+        if (res.statusCode >= 400) {
+            storeFailedLog(req, res.statusCode, body, null);
+        }
+        return originalJson.call(this, body);
+    };
+    next();
+});
 
 app.post('/api/send-message', async (req, res) => {
     try {
@@ -143,15 +191,23 @@ app.post('/api/send-bulk-messages', async (req, res) => {
                     }
                 });
                 return {
+                    name: recipient.name || recipient.customerName || 'Unknown',
                     phoneNumber: recipient.phoneNumber,
                     status: 'success',
-                    data: response.data
+                    data: response.data,
+                    time: new Date().toISOString(),
+                    templateId: templateId,
+                    parameters: recipient.parameters || []
                 };
             } catch (error) {
                 return {
+                    name: recipient.name || recipient.customerName || 'Unknown',
                     phoneNumber: recipient.phoneNumber,
                     status: 'failed',
-                    error: error.response ? error.response.data : error.message
+                    error: error.response ? error.response.data : error.message,
+                    time: new Date().toISOString(),
+                    templateId: templateId,
+                    parameters: recipient.parameters || []
                 };
             }
         });
@@ -162,6 +218,27 @@ app.post('/api/send-bulk-messages', async (req, res) => {
         const details = results.map(r => r.value);
         const successful = details.filter(d => d.status === 'success').length;
         const failed = details.filter(d => d.status === 'failed').length;
+
+        try {
+            const logsDir = path.join(__dirname, 'data');
+            if (!fs.existsSync(logsDir)) {
+                fs.mkdirSync(logsDir);
+            }
+            const logsFile = path.join(logsDir, 'bulk_message_logs.json');
+
+            let existingLogs = [];
+            if (fs.existsSync(logsFile)) {
+                const fileContent = fs.readFileSync(logsFile, 'utf8');
+                if (fileContent) {
+                    existingLogs = JSON.parse(fileContent);
+                }
+            }
+
+            existingLogs = [...existingLogs, ...details];
+            fs.writeFileSync(logsFile, JSON.stringify(existingLogs, null, 2));
+        } catch (logError) {
+            console.error('Error saving bulk message logs:', logError);
+        }
 
         const summary = {
             total: recipients.length,
@@ -182,6 +259,40 @@ app.post('/api/send-bulk-messages', async (req, res) => {
             success: false,
             error: 'Internal server error while processing bulk messages.'
         });
+    }
+});
+
+app.get('/api/bulk-message-logs', (req, res) => {
+    try {
+        const logsFile = path.join(__dirname, 'data', 'bulk_message_logs.json');
+        if (fs.existsSync(logsFile)) {
+            const fileContent = fs.readFileSync(logsFile, 'utf8');
+            const logs = fileContent ? JSON.parse(fileContent) : [];
+            const sortedLogs = logs.sort((a, b) => new Date(b.time) - new Date(a.time));
+            res.status(200).json({ success: true, count: sortedLogs.length, data: sortedLogs });
+        } else {
+            res.status(200).json({ success: true, count: 0, data: [] });
+        }
+    } catch (error) {
+        console.error('Error reading logs:', error);
+        res.status(500).json({ success: false, error: 'Internal server error while fetching logs.' });
+    }
+});
+
+app.get('/api/failed-logs', (req, res) => {
+    try {
+        const logsFile = path.join(__dirname, 'data', 'api_error_logs.json');
+        if (fs.existsSync(logsFile)) {
+            const fileContent = fs.readFileSync(logsFile, 'utf8');
+            const logs = fileContent ? JSON.parse(fileContent) : [];
+            const sortedLogs = logs.sort((a, b) => new Date(b.time) - new Date(a.time));
+            res.status(200).json({ success: true, count: sortedLogs.length, data: sortedLogs });
+        } else {
+            res.status(200).json({ success: true, count: 0, data: [] });
+        }
+    } catch (error) {
+        console.error('Error reading failed logs:', error);
+        res.status(500).json({ success: false, error: 'Internal server error while fetching failed logs.' });
     }
 });
 
@@ -243,7 +354,7 @@ app.post('/api/webhooks/shopify/customer-created', async (req, res) => {
                     try {
                         // Call the local /api/send-message endpoint
                         const apiUrl = `${process.env.BACKEND_PROD_URL}/send-message`;
-                        await axios.post(apiUrl, {
+                        const response = await axios.post(apiUrl, {
                             phoneNumber: cleanPhoneNumber,
                             templateId: templateId,
                             parameters: [
@@ -253,12 +364,18 @@ app.post('/api/webhooks/shopify/customer-created', async (req, res) => {
                                 }
                             ]
                         });
-                        console.log(`Successfully triggered send-message for Shopify customer ${customer.id}`);
+                        if (response.data && response.data.success) {
+                            console.log(`✅ Successfully sent WhatsApp message for Shopify customer ${customer.id}`);
+                        } else {
+                            console.error(`❌ Message failed for customer ${customer.id}:`, response.data);
+                        }
                     } catch (err) {
-                        console.error('Error calling /api/send-message:', err.response ? err.response.data : err.message);
+                        console.error(`🚨 Critical Error calling send-message for customer ${customer.id}:`, err.response ? err.response.data : err.message);
+                        storeFailedLog(req, 500, null, err.response ? err.response.data : err.message);
+                        // You could add a retry mechanism, Discord alert, or email notification here if needed
                     }
                 } else {
-                    console.log('Missing SHOPIFY_WELCOME_TEMPLATE_ID. Skipping message.');
+                    console.log('Missing CUSTOMER_CRETED_TEMPLATE. Skipping message.');
                 }
             } else {
                 console.log(`No phone number found for Shopify customer ${customer.id}`);
@@ -271,6 +388,11 @@ app.post('/api/webhooks/shopify/customer-created', async (req, res) => {
             res.status(500).json({ success: false, error: 'Internal server error while processing webhook' });
         }
     }
+});
+
+// Catch-all for non-existent routes
+app.use((req, res) => {
+    res.status(404).json({ success: false, error: 'API route not found' });
 });
 
 app.listen(port, () => {

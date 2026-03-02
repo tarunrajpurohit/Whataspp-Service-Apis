@@ -1,0 +1,24 @@
+[
+  {
+    "time": "2026-03-02T11:36:09.545Z",
+    "endpoint": "/api/send-message",
+    "method": "POST",
+    "requestBody": {
+      "phoneNumber": "+916350182509",
+      "templateId": "hello_world"
+    },
+    "responseStatus": 401,
+    "errorDetails": {
+      "success": false,
+      "error": {
+        "error": {
+          "message": "Error validating access token: Session has expired on Monday, 02-Mar-26 01:00:00 PST. The current time is Monday, 02-Mar-26 03:36:10 PST.",
+          "type": "OAuthException",
+          "code": 190,
+          "error_subcode": 463,
+          "fbtrace_id": "ATdfBZbJRudX3D7La3Z_GMY"
+        }
+      }
+    }
+  }
+]
