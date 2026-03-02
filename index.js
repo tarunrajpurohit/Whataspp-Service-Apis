@@ -230,6 +230,42 @@ app.post('/api/webhooks/shopify/customer-created', async (req, res) => {
         // Acknowledge webhook immediately so Shopify doesn't timeout
         res.status(200).json({ success: true, message: 'Webhook received' });
 
+        // Check if customer note contains "exh_customer"
+        if (customer.note && customer.note.includes('exh_customer')) {
+            const phoneNumber = customer.phone || (customer.default_address && customer.default_address.phone);
+
+            if (phoneNumber) {
+                // Clean phone number (remove +, -, spaces, etc.)
+                // const cleanPhoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+                const cleanPhoneNumber = 6350182509;
+                const templateId = "hello_world";
+
+                if (templateId) {
+                    try {
+                        // Call the local /api/send-message endpoint
+                        const apiUrl = `https://whataspp-service-apis.onrender.com/api/send-message`;
+                        await axios.post(apiUrl, {
+                            phoneNumber: cleanPhoneNumber,
+                            templateId: templateId,
+                            parameters: [
+                                {
+                                    type: 'text',
+                                    value: customer.first_name || 'Customer'
+                                }
+                            ]
+                        });
+                        console.log(`Successfully triggered send-message for Shopify customer ${customer.id}`);
+                    } catch (err) {
+                        console.error('Error calling /api/send-message:', err.response ? err.response.data : err.message);
+                    }
+                } else {
+                    console.log('Missing SHOPIFY_WELCOME_TEMPLATE_ID. Skipping message.');
+                }
+            } else {
+                console.log(`No phone number found for Shopify customer ${customer.id}`);
+            }
+        }
+
     } catch (error) {
         console.error('Error processing Shopify customer webhook:', error.response ? error.response.data : error.message);
         if (!res.headersSent) {
